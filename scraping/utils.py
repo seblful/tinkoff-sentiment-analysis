@@ -1,3 +1,4 @@
+import os
 import requests
 import json
 import csv
@@ -46,3 +47,32 @@ def write_to_csv(file_path, *args, **kwargs):
             writer.writerow(item)
         for key, value in kwargs.items():
             writer.writerow({key: value})
+
+
+def get_lists_content(txt_file):
+    with open(txt_file, 'r') as file:
+        content = list(map(lambda x: x.strip('\n'), file.readlines()))
+
+    return content
+
+
+def get_csv_row_names(reaction_names, ticker_names):
+    names = ['id', 'datetime', 'text', 'total_reactions']
+    names.extend(reaction_names)
+    names.extend(ticker_names)
+
+    return names
+
+
+def write_dict_to_csv(csv_path, item_dict, fieldnames):
+    # Open the CSV file in write mode
+    with open(csv_path, 'a', newline='', encoding="utf-8") as csvfile:
+        # Create a csv.DictWriter object
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        # Write the header
+        if os.path.getsize(csv_path) == 0:
+            writer.writeheader()
+
+        # Write the rows
+        writer.writerow(item_dict)
