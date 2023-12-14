@@ -1,3 +1,4 @@
-scraping/draft.py
-scraping/pulse.csv
+draft.py
+draft.ipynb
+pulse.csv
 *.pyc
