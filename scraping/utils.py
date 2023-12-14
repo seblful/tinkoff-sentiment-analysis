@@ -7,7 +7,7 @@ import datetime
 
 def get_api_data(url_api):
     # Get results and results content
-    result = requests.get(url_api)
+    result = requests.get(url_api, timeout=10)
     content = result.content
 
     # Format bytes object to dict
@@ -57,7 +57,7 @@ def get_lists_content(txt_file):
 
 
 def get_csv_row_names(reaction_names, ticker_names):
-    names = ['id', 'datetime', 'text', 'total_reactions']
+    names = ['id', 'datetime', 'text', 'total_reactions', 'next_cursor']
     names.extend(reaction_names)
     names.extend(ticker_names)
 
