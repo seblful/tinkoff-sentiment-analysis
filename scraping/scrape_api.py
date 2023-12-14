@@ -3,7 +3,8 @@ from utils import get_api_data, format_date, get_input_date, get_lists_content, 
 import os
 from datetime import datetime, date, time
 import pytz
-
+from numpy import random
+from time import sleep
 
 # Set variables
 # STOCK_NAME = ''
@@ -22,7 +23,9 @@ CSV_ROW_NAMES = get_csv_row_names(REACTION_NAMES, POP_TICKER_NAMES)
 
 # DATE_START = get_input_date()
 # DATE_END = ''
-DATE_START = date(2023, 12, 12)
+DATETIME_NOW = datetime.now()
+DATETIME_NOW = pytz.utc.localize(DATETIME_NOW)
+DATE_START = date(2021, 1, 1)
 DATETIME_START = datetime.combine(DATE_START, time.min)
 DATETIME_START = pytz.utc.localize(DATETIME_START)
 
@@ -69,7 +72,8 @@ def process_and_write_data(data):
         item_dict = {'id': item_id,
                      'datetime': item_datetime_str,
                      'text': item_text,
-                     'total_reactions': item_reactions_total_counts}
+                     'total_reactions': item_reactions_total_counts,
+                     'next_cursor': next_cursor}
 
         merged_item_dict = dict(
             item_dict, **reaction_names_dict, **ticker_names_dict)
@@ -81,7 +85,7 @@ def process_and_write_data(data):
                           item_dict=merged_item_dict,
                           fieldnames=CSV_ROW_NAMES)
 
-    return next_cursor, item_datetime, merged_item_dict
+    return next_cursor, item_datetime
 
 # item_id, item_datetime, item_text, item_reactions_total_counts, *item_reactions_type, *instrument_name
 # item_id, item_datetime_str, item_text, item_reactions_total_counts, *item_reactions_count, *instrument_price
@@ -95,15 +99,25 @@ def main():
 
     # Get data from now to DATETIME_START
     item_datetime = DATETIME_START
+    sum_days_to_scrape = (DATETIME_NOW - DATETIME_START).days + 1
+    print(f"It is {sum_days_to_scrape} days to scrape.")
+
     while DATETIME_START <= item_datetime:
         # Get chank of json data
         data = get_api_data(url_api)
         # Process data and write to csv
-        next_cursor, item_datetime, merged_item_dict = process_and_write_data(
-            data)
+        next_cursor, item_datetime = process_and_write_data(data)
 
         # Create new url_api with new cursor
         url_api = f'https://www.tinkoff.ru/api/invest-gw/social/post/feed/v1/post/instrument/SBER?sessionId=QxZLiUIV31WxIZ4WonMwyIGI3UqG0zFO.ds-prod-api-101&appName=socialweb&appVersion=1.380.0&origin=web&platform=web&limit={recordings_limit}&cursor={next_cursor}&include=all'
+
+        # Count how many days left
+        sum_days_left = sum_days_to_scrape - \
+            (item_datetime - DATETIME_START).days - 1
+        print(f"It was scraped {sum_days_left}/{sum_days_to_scrape} days.")
+
+        # Sleep some time
+        sleep(random.uniform(2, 4))
 
 
 if __name__ == '__main__':
