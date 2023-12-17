@@ -25,10 +25,7 @@ import torch.nn.functional as F
 class UtilsClass:
     def __init__(self):
         self.__stop_words = None
-        # self.proxy_json_url = 'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.json'
-        self.proxy_json_url = "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.json"
-        self.__proxy_dict = None
-        self.__headers_list = None
+        self.translator_url = "http://127.0.0.1:5000/translate"
 
         self.load_nlp()
 
@@ -40,40 +37,6 @@ class UtilsClass:
             self.__stop_words = [word for word in stopwords.words(
                 'russian') if word not in not_stop_words]
         return self.__stop_words
-
-    @property
-    def proxy_dict(self):
-        if self.__proxy_dict is None:
-            data = requests.get(self.proxy_json_url).content
-            data_json = json.loads(data)
-            self.__proxy_dict = {}
-            for item in data_json:
-                key = item['protocol']
-                # self.__proxy_dict[key] = self.__proxy_dict.setdefault(
-                #     key, []).append(item['proxy'])
-                self.__proxy_dict[key] = self.__proxy_dict.get(
-                    key, []) + [item['proxy']]
-
-        return self.__proxy_dict
-
-    @property
-    def headers_list(self):
-        if self.__headers_list is None:
-            self.__headers_list = [
-                Headers(headers=True).generate() for _ in range(50)]
-
-        return self.__headers_list
-
-    def get_random_proxies_dict(self):
-        proxy = {key: random.choice(value)
-                 for key, value in self.proxy_dict.items()}
-
-        return proxy
-
-    def get_random_headers_dict(self):
-        header = random.choice(self.headers_list)
-
-        return header
 
     def load_nlp(self):
         # !python -m spacy download ru_core_news_sm
@@ -99,14 +62,30 @@ class UtilsClass:
         return text
 
     def translate_text(self, text):
-        proxy = self.get_random_proxies_dict()
-        header = self.get_random_headers_dict()
 
-        print("Random proxy: ", proxy)
-        print("Random header: ", header)
+        if len(text.strip()) == 0:
+            return text
 
-        translated = GoogleTranslator(
-            source='ru', target='en', proxies=proxy, headers=header).translate(text)
+        payload = {
+            "q": text,
+            "source": "ru",
+            "target": "en",
+            "format": "text",
+            "api_key": ""
+        }
+
+        headers = {
+            "Content-Type": "application/json"
+        }
+
+        # print(text)
+
+        response = requests.post(
+            self.translator_url, json=payload, headers=headers)
+
+        # print(response.json())
+
+        translated = response.json()['translatedText']
 
         return translated
 
@@ -153,32 +132,15 @@ class TrainDataCreator:
             model_name=model_name)
         self.model_id2label = self.model.config.id2label
 
-    def translate_text_df(self, name_of_column):
-        self.train_df['eng_text'] = ''
-        for index, value in tqdm(self.train_df[name_of_column].items(), desc='Translating text', total=self.sample_size):
-            i = index
-            while i == index:
-                try:
-                    self.train_df.at[index,
-                                     'eng_text'] = self.util.translate_text(value)
-                    i = -1
-                except RequestError as request_error:
-                    time_to_sleep = random.uniform(10, 20)
-                    time.sleep(time_to_sleep)
-                    print(
-                        f"Too many requests for proxy, trying again after sleeping for {time_to_sleep:.2f} seconds.")
-
-                    continue
-
     def process(self):
         tqdm.pandas(desc='Cleaning text')
         self.train_df['clean_text'] = self.train_df.loc[:,
                                                         'text'].progress_apply(self.util.clean_text)
 
-        # tqdm.pandas(desc='Translating text')
-        # self.train_df['eng_text'] = self.train_df.loc[:,
-        #                                               'clean_text'].progress_apply(self.util.translate_text)
-        self.translate_text_df(name_of_column='clean_text')
+        tqdm.pandas(desc='Translating text')
+        self.train_df['eng_text'] = self.train_df.loc[:,
+                                                      'clean_text'].progress_apply(self.util.translate_text)
+        # self.translate_text_df(name_of_column='clean_text')
 
         tqdm.pandas(desc='Classifying text')
         self.train_df[['predicted_label', 'predicted_score']] = self.train_df.loc[:,
