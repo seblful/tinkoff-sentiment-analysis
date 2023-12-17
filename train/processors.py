@@ -50,7 +50,7 @@ class UtilsClass:
         text = re.sub("#\w+", " ", text)
         text = re.sub("https?://\S+|www\.\S+", " ", text)
         text = demoji.replace(text, ' ')
-        # text = Speller(lang='ru')(text)
+        text = Speller(lang='ru')(text)
         text = re.sub(r"[^a-zA-ZА-Яа-я]", " ", text)
 
         text = " ".join(word for word in text.split()
@@ -78,12 +78,8 @@ class UtilsClass:
             "Content-Type": "application/json"
         }
 
-        # print(text)
-
         response = requests.post(
             self.translator_url, json=payload, headers=headers)
-
-        # print(response.json())
 
         translated = response.json()['translatedText']
 
