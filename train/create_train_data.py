@@ -5,7 +5,7 @@ eng_classifier_model_name = "mrm8488/distilroberta-finetuned-financial-news-sent
 
 def main():
     train_data_creator = TrainDataCreator(csv_filename='pulse.csv',
-                                          sample_size=5,
+                                          sample_size=5000,
                                           model_name=eng_classifier_model_name)
     train_data_creator.process()
     train_data_creator.save_data_to_excel()
