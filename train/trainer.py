@@ -1,8 +1,13 @@
 import pandas as pd
+from tqdm import tqdm
+
 from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import StandardScaler
 
 import torch
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 import datasets
 from datasets import Dataset, DatasetDict
@@ -12,7 +17,6 @@ import transformers
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import set_seed, get_linear_schedule_with_warmup
 
-from tqdm import tqdm
 from accelerate import Accelerator, DistributedType
 
 
@@ -32,6 +36,7 @@ class TransformerDataset:
 
         self.text_column = text_column
         self.label_column = label_column
+        self.target_columns = ['clean_text', self.label_column]
         self.label2id = {'negative': 0, 'neutral': 1, 'positive': 2}
 
         self.model_name = model_name
@@ -40,13 +45,13 @@ class TransformerDataset:
 
         self.merged_df = self.load_df(df_path)
         self.train_df, self.val_df, self.test_df = self.create_dfs()
+        self.tiny_train_df, self.tiny_val_df, self.tiny_test_df = self.create_tiny_dfs()
         self.train_dataset, self.val_dataset, self.test_dataset = self.create_datasets()
         self.__dataset = None
         self.__tokenized_dataset = None
 
     def load_df(self, df_path):
         df = pd.read_excel(df_path, index_col=0).dropna()
-        df = df.loc[:, ['clean_text', self.label_column]]
         df[self.label_column] = df[self.label_column].map(self.label2id)
 
         return df
@@ -64,10 +69,17 @@ class TransformerDataset:
 
         return train_df, val_df, test_df
 
+    def create_tiny_dfs(self):
+        train_df, val_df, test_df = [df.loc[:, self.target_columns]
+                                     for df in [self.train_df, self.val_df, self.test_df]]
+
+        return train_df, val_df, test_df
+
     def create_datasets(self):
-        train_dataset = Dataset.from_pandas(self.train_df)
-        val_dataset = Dataset.from_pandas(self.val_df)
-        test_dataset = Dataset.from_pandas(self.test_df)
+
+        train_dataset = Dataset.from_pandas(self.tiny_train_df)
+        val_dataset = Dataset.from_pandas(self.tiny_val_df)
+        test_dataset = Dataset.from_pandas(self.tiny_test_df)
 
         return train_dataset, val_dataset, test_dataset
 
@@ -262,9 +274,93 @@ class TransformerTrainer:
         self.model.save_pretrained(self.save_model_path)
 
 
-class XGBDataset:
-    pass
+class XGBostProcessor:
+    def __init__(self,
+                 train_df,
+                 val_df,
+                 test_df,
+                 transf_model,
+                 transf_tokenizer):
+
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        self.tfidf_vectorizer = TfidfVectorizer()
+        self.transf_model = transf_model
+        self.transf_tokenizer = transf_tokenizer
+
+        self.target_columns = ['datetime', 'total_reactions', 'like',
+                               'rocket', 'buy-up', 'dislike', 'not-convinced', 'get-rid', 'SBER',
+                               'SBERP', 'GAZP', 'LKOH', 'VTBR', 'MOEX', 'ROSN', 'YNDX', 'TCSG', 'NVTK',
+                               'USDRUB', 'TATN', 'GMKN', 'MGNT', 'POLY', 'VKCO', 'CHMF', 'MTSS',
+                               'OZON', 'POSI', 'clean_text']
+        self.label_column = 'labels'
+
+        self.train_df = train_df
+        self.val_df = val_df
+        self.test_df = test_df
+
+        self.formatted_train_df = self.preprocess_df(
+            df=self.train_df, name_of_set='train')
+        self.formatted_val_df = self.preprocess_df(
+            df=val_df, name_of_set='validation')
+        self.formatted_test_df = self.preprocess_df(
+            df=test_df, name_of_set='test')
+
+        # # Create and fit StandardScaler
+        # self.standart_scaler = StandardScaler().set_output(transform="pandas")
+        # self.standart_scaler.fit(self.formatted_train_df)
+
+    def preprocess_df(self, df, name_of_set):
+        # Leave only target columns
+        df = df.loc[:, self.target_columns]
+
+        # Format datetime column to datetime format
+        df['datetime'] = pd.to_datetime(df['datetime'])
+
+        # Create predictions with transf_model
+        tqdm.pandas(desc=f'Classifying text of {name_of_set} set for XGBoost')
+        df[['predicted_label', 'predicted_score']] = df.loc[:,
+                                                            'clean_text'].progress_apply(self.classify_text)
+        # Preprocess text (vectorization) and rename column
+        df['clean_text'] = self.tfidf_vectorizer.fit_transform(
+            df['clean_text']).toarray()
+        df.rename(columns={"clean_text": "clean_text_tfidf"}, inplace=True)
+
+        # # Scale columns with StandardScaler()
+        # print(self.standart_scaler.transform(df))
+
+        return df
+
+    def classify_text(self, text):
+        # Decreaze length of text to model maximum
+        text = text[:500]
+
+        encoded_input = self.transf_tokenizer(
+            text, return_tensors='pt').to(self.device)
+
+        # Get the logits
+        output = self.transf_model(**encoded_input)
+        logits = output.logits
+        probabilities = F.softmax(logits, dim=1)
+
+        # Access the id2label mapping
+        predicted_class_id = logits.argmax().item()
+        predicted_class = self.transf_model.config.id2label[predicted_class_id]
+        predicted_probability = probabilities.squeeze()[
+            predicted_class_id].item()
+
+        return pd.Series((predicted_class, predicted_probability))
 
 
-class XGBTrainer:
-    pass
+# data_dmatrix = xgb.DMatrix(data=X,label=y)
+
+# # Train the XGBoost model
+# xg_reg = xgb.train(params=params, dtrain=data_dmatrix, num_boost_round=10)
+
+# params = {
+#     'objective':'reg:squarederror',
+#     'colsample_bytree': 0.3,
+#     'learning_rate': 0.1,
+#     'max_depth': 5,
+#     'alpha': 10
+# }
