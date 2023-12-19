@@ -117,12 +117,15 @@ class TransformerTrainer:
                  epochs,
                  batch_size,
                  random_seed,
+                 save_model_path,
                  adam_epsilon=1e-8,
                  lr=3e-5,
                  num_warmup_steps=10):
 
         self.epochs = epochs
         self.batch_size = batch_size
+
+        self.save_model_path = save_model_path
 
         self.tokenized_dataset = tokenized_dataset
 
@@ -141,6 +144,11 @@ class TransformerTrainer:
                                                             num_training_steps=len(
                                                                 self.train_dataloader) * self.epochs)
 
+        self.accuracy = evaluate.load("accuracy")
+
+        self.progress_bar = tqdm(range(self.epochs * len(self.train_dataloader)),
+                                 disable=not self.accelerator.is_main_process)
+
         self.random_seed = random_seed
 
     def create_dataloaders(self):
@@ -153,11 +161,7 @@ class TransformerTrainer:
 
         return train_dataloader, val_dataloader, test_dataloader
 
-    def train(self):
-
-        set_seed(self.random_seed)
-        accuracy = evaluate.load("accuracy")
-
+    def set_logging(self):
         if self.accelerator.is_main_process:
             datasets.utils.logging.set_verbosity_warning()
             transformers.utils.logging.set_verbosity_info()
@@ -165,54 +169,97 @@ class TransformerTrainer:
             datasets.utils.logging.set_verbosity_error()
             transformers.utils.logging.set_verbosity_error()
 
-        model, optimizer, train_dataloader, eval_dataloader = self.accelerator.prepare(
-            self.model, self.optimizer, self.train_dataloader, self.val_dataloader
-        )
+    def prepare_mod(self):
+        self.model, self.optimizer, self.train_dataloader, self.val_dataloader, self.test_dataloader = self.accelerator.prepare(self.model,
+                                                                                                                                self.optimizer,
+                                                                                                                                self.train_dataloader,
+                                                                                                                                self.val_dataloader,
+                                                                                                                                self.test_dataloader)
 
-        progress_bar = tqdm(
-            range(self.epochs * len(train_dataloader)),
-            disable=not self.accelerator.is_main_process,
-        )
+    def prepare_all(self):
+        # Preparation for training
+        set_seed(self.random_seed)
+        self.set_logging()
+        self.prepare_mod()
+
+    def train_step(self):
+        self.model.train()
+
+        for step, batch in enumerate(self.train_dataloader):
+            outputs = self.model(**batch)
+            loss = outputs.loss
+            self.accelerator.backward(loss)
+
+            self.optimizer.step()
+            self.lr_scheduler.step()
+            self.optimizer.zero_grad()
+            self.progress_bar.update(1)
+
+    def val_step(self):
+        self.model.eval()
+
+        all_predictions = []
+        all_labels = []
+
+        for step, batch in enumerate(self.val_dataloader):
+            with torch.no_grad():
+                outputs = self.model(**batch)
+            predictions = outputs.logits.argmax(dim=-1)
+
+            # gather predictions and labels from the 8 TPUs
+            all_predictions.append(self.accelerator.gather(predictions))
+            all_labels.append(self.accelerator.gather(batch["labels"]))
+
+        # Concatenate all predictions and labels.
+        all_predictions = torch.cat(all_predictions)[
+            :len(self.tokenized_dataset["validation"])]
+        all_labels = torch.cat(all_labels)[: len(
+            self.tokenized_dataset["validation"])]
+
+        val_accuracy = self.accuracy.compute(predictions=all_predictions,
+                                             references=all_labels)
+
+        return val_accuracy
+
+    def train(self):
+        self.prepare_all()
 
         # Model Training
         for epoch in range(self.epochs):
-            model.train()
-            for step, batch in enumerate(train_dataloader):
-                outputs = model(**batch)
-                loss = outputs.loss
-                self.accelerator.backward(loss)
-
-                optimizer.step()
-                self.lr_scheduler.step()
-                optimizer.zero_grad()
-                progress_bar.update(1)
-
-            model.eval()
-            all_predictions = []
-            all_labels = []
-
-            for step, batch in enumerate(eval_dataloader):
-                with torch.no_grad():
-                    outputs = model(**batch)
-                predictions = outputs.logits.argmax(dim=-1)
-
-                # gather predictions and labels from the 8 TPUs
-                all_predictions.append(self.accelerator.gather(predictions))
-                all_labels.append(self.accelerator.gather(batch["labels"]))
-
-            # Concatenate all predictions and labels.
-            all_predictions = torch.cat(all_predictions)[
-                : len(self.tokenized_dataset["validation"])
-            ]
-            all_labels = torch.cat(all_labels)[: len(
-                self.tokenized_dataset["validation"])]
-
-            eval_accuracy = accuracy.compute(
-                predictions=all_predictions, references=all_labels
-            )
+            self.train_step()
+            val_accuracy = self.val_step()
 
             # Use accelerator.print to print only on the main process.
-            self.accelerator.print(f"epoch {epoch + 1}:", eval_accuracy)
+            self.accelerator.print(f"Epoch {epoch + 1}:", val_accuracy)
+
+    def test(self):
+        self.model.eval()
+
+        all_predictions = []
+        all_labels = []
+
+        for step, batch in enumerate(self.test_dataloader):
+            with torch.no_grad():
+                outputs = self.model(**batch)
+            predictions = outputs.logits.argmax(dim=-1)
+
+            # gather predictions and labels from the 8 TPUs
+            all_predictions.append(self.accelerator.gather(predictions))
+            all_labels.append(self.accelerator.gather(batch["labels"]))
+
+        # Concatenate all predictions and labels.
+        all_predictions = torch.cat(all_predictions)[
+            :len(self.tokenized_dataset["test"])]
+        all_labels = torch.cat(all_labels)[: len(
+            self.tokenized_dataset["test"])]
+
+        test_accuracy = self.accuracy.compute(predictions=all_predictions,
+                                              references=all_labels)
+
+        return test_accuracy
+
+    def save_model(self):
+        self.model.save_pretrained(self.save_model_path)
 
 
 class XGBDataset:
