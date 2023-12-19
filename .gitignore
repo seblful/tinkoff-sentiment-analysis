@@ -1,4 +1,5 @@
 train/train_data.xlsx
+train/rubert-tiny2-finetuned
 draft.py
 draft.ipynb
 pulse.csv
