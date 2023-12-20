@@ -275,7 +275,7 @@ class TransformerTrainer:
             self.tokenized_dataset["test"])]
 
         test_accuracy = self.accuracy.compute(predictions=all_predictions,
-                                              references=all_labels)
+                                              references=all_labels)['accuracy']
 
         return test_accuracy
 
