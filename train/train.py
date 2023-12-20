@@ -9,10 +9,10 @@ FINETUNED_MODEL_PATH = os.path.join(HOME, 'rubert-tiny2-finetuned')
 XGBOOST_MODEL_PATH = os.path.join(HOME, 'xgb_dart.json')
 
 VALIDATION_SIZE = 0.2
-MAX_LENGTH = 256
+MAX_LENGTH = 48
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 
 RANDOM_STATE = 11
 RANDOM_SEED = 12
@@ -47,7 +47,6 @@ def main():
 
     # Test Transformer model and save it
     print(f"Test accuracy of Transformer model: {transf_trainer.test()}.")
-    transf_trainer.save_model()
 
     # Get transf_model for XGBostProcessor
     transf_model = transf_trainer.model
@@ -66,7 +65,6 @@ def main():
 
     # Test XGBoost model and save it
     print(f"Test accuracy of XGBoost model: {xgb_processor.test()}")
-    xgb_processor.save_model()
 
 
 if __name__ == '__main__':
