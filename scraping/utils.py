@@ -34,21 +34,6 @@ def get_input_date():
     return datetime.date(year, month, day)
 
 
-def write_to_csv(file_path, *args):
-    with open(file_path, 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(args)
-
-
-def write_to_csv(file_path, *args, **kwargs):
-    with open(file_path, 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        for item in args:
-            writer.writerow(item)
-        for key, value in kwargs.items():
-            writer.writerow({key: value})
-
-
 def get_lists_content(txt_file):
     with open(txt_file, 'r') as file:
         content = list(map(lambda x: x.strip('\n'), file.readlines()))
