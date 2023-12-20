@@ -1,5 +1,11 @@
 train/train_data.xlsx
 train/rubert-tiny2-finetuned
+
+process/lists
+process/rubert-tiny2-finetuned
+process/xgb_dart.json
+process/tinkoff_data.csv
+
 draft.py
 draft.ipynb
 pulse.csv
