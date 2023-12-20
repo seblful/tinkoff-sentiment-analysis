@@ -161,6 +161,7 @@ class TransformerTrainer:
                                                                 self.train_dataloader) * self.epochs)
 
         self.accuracy = evaluate.load("accuracy")
+        self.best_val_accuracy = 0
 
         self.progress_bar = tqdm(range(self.epochs * len(self.train_dataloader)),
                                  disable=not self.accelerator.is_main_process)
@@ -233,7 +234,11 @@ class TransformerTrainer:
             self.tokenized_dataset["validation"])]
 
         val_accuracy = self.accuracy.compute(predictions=all_predictions,
-                                             references=all_labels)
+                                             references=all_labels)['accuracy']
+
+        if val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = val_accuracy
+            self.save_model()
 
         return val_accuracy
 
@@ -382,6 +387,8 @@ class XGBostProcessor:
         self.xgb_classificator.fit(X=self.formatted_train_df,
                                    y=self.train_labels,
                                    eval_set=[(self.formatted_val_df, self.val_labels)])
+
+        self.save_model()
 
         val_predictions = self.xgb_classificator.predict(
             X=self.formatted_val_df)
