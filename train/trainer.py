@@ -4,6 +4,7 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score
 
 import torch
 from torch.utils.data import DataLoader
@@ -18,6 +19,9 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import set_seed, get_linear_schedule_with_warmup
 
 from accelerate import Accelerator, DistributedType
+
+import xgboost as xgb
+from xgboost import XGBClassifier
 
 
 class TransformerDataset:
@@ -280,25 +284,39 @@ class XGBostProcessor:
                  val_df,
                  test_df,
                  transf_model,
-                 transf_tokenizer):
+                 transf_tokenizer,
+                 save_model_path):
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        self.save_model_path = save_model_path
 
         self.tfidf_vectorizer = TfidfVectorizer()
         self.transf_model = transf_model
         self.transf_tokenizer = transf_tokenizer
 
-        self.target_columns = ['datetime', 'total_reactions', 'like',
-                               'rocket', 'buy-up', 'dislike', 'not-convinced', 'get-rid', 'SBER',
-                               'SBERP', 'GAZP', 'LKOH', 'VTBR', 'MOEX', 'ROSN', 'YNDX', 'TCSG', 'NVTK',
-                               'USDRUB', 'TATN', 'GMKN', 'MGNT', 'POLY', 'VKCO', 'CHMF', 'MTSS',
-                               'OZON', 'POSI', 'clean_text']
+        self.target_columns = ['total_reactions', 'like', 'rocket', 'buy-up', 'dislike',
+                               'not-convinced', 'get-rid', 'SBER', 'SBERP', 'GAZP', 'LKOH', 'VTBR',
+                               'MOEX', 'ROSN', 'YNDX', 'TCSG', 'NVTK', 'USDRUB', 'TATN', 'GMKN',
+                               'MGNT', 'POLY', 'VKCO', 'CHMF', 'MTSS', 'OZON', 'POSI', 'clean_text']
+
+        self.scaler_columns = ['total_reactions', 'like', 'rocket', 'buy-up', 'dislike', 'not-convinced',
+                               'get-rid', 'SBER', 'SBERP', 'GAZP', 'LKOH', 'VTBR', 'MOEX', 'ROSN',
+                               'YNDX', 'TCSG', 'NVTK', 'USDRUB', 'TATN', 'GMKN', 'MGNT', 'POLY',
+                               'VKCO', 'CHMF', 'MTSS', 'OZON', 'POSI', 'predicted_label',
+                               'predicted_score']
+
         self.label_column = 'labels'
 
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
 
+        self.train_labels = self.train_df.loc[:, self.label_column].values
+        self.val_labels = self.val_df.loc[:, self.label_column].values
+        self.test_labels = self.test_df.loc[:, self.label_column].values
+
+        # Create formatted dfs
         self.formatted_train_df = self.preprocess_df(
             df=self.train_df, name_of_set='train')
         self.formatted_val_df = self.preprocess_df(
@@ -306,28 +324,33 @@ class XGBostProcessor:
         self.formatted_test_df = self.preprocess_df(
             df=test_df, name_of_set='test')
 
-        # # Create and fit StandardScaler
-        # self.standart_scaler = StandardScaler().set_output(transform="pandas")
-        # self.standart_scaler.fit(self.formatted_train_df)
+        # Create and fit StandardScaler
+        self.standart_scaler = StandardScaler()
+        self.standart_scaler.fit(
+            self.formatted_train_df.loc[:, self.scaler_columns])
+
+        # Scale dfs
+        self.scale_df(self.formatted_train_df)
+        self.scale_df(self.formatted_val_df)
+        self.scale_df(self.formatted_test_df)
+
+        # XGBoost model
+        self.xgb_classificator = XGBClassifier(max_depth=5,
+                                               learning_rate=0.1,
+                                               objective='multi:softmax',
+                                               booster='dart',
+                                               sampling_method='uniform',
+                                               num_classes=3)
 
     def preprocess_df(self, df, name_of_set):
         # Leave only target columns
         df = df.loc[:, self.target_columns]
 
-        # Format datetime column to datetime format
-        df['datetime'] = pd.to_datetime(df['datetime'])
-
-        # Create predictions with transf_model
+        # Create predictions with transf_model and delete column with text
         tqdm.pandas(desc=f'Classifying text of {name_of_set} set for XGBoost')
         df[['predicted_label', 'predicted_score']] = df.loc[:,
                                                             'clean_text'].progress_apply(self.classify_text)
-        # Preprocess text (vectorization) and rename column
-        df['clean_text'] = self.tfidf_vectorizer.fit_transform(
-            df['clean_text']).toarray()
-        df.rename(columns={"clean_text": "clean_text_tfidf"}, inplace=True)
-
-        # # Scale columns with StandardScaler()
-        # print(self.standart_scaler.transform(df))
+        df.drop(columns=['clean_text'], axis=1, inplace=True)
 
         return df
 
@@ -345,22 +368,35 @@ class XGBostProcessor:
 
         # Access the id2label mapping
         predicted_class_id = logits.argmax().item()
-        predicted_class = self.transf_model.config.id2label[predicted_class_id]
+        # predicted_class = self.transf_model.config.id2label[predicted_class_id]
         predicted_probability = probabilities.squeeze()[
             predicted_class_id].item()
 
-        return pd.Series((predicted_class, predicted_probability))
+        return pd.Series((predicted_class_id, predicted_probability))
 
+    def scale_df(self, df):
+        df.loc[:, self.scaler_columns] = self.standart_scaler.transform(
+            df.loc[:, self.scaler_columns])
 
-# data_dmatrix = xgb.DMatrix(data=X,label=y)
+    def fit_xgb(self):
+        self.xgb_classificator.fit(X=self.formatted_train_df,
+                                   y=self.train_labels,
+                                   eval_set=[(self.formatted_val_df, self.val_labels)])
 
-# # Train the XGBoost model
-# xg_reg = xgb.train(params=params, dtrain=data_dmatrix, num_boost_round=10)
+        val_predictions = self.xgb_classificator.predict(
+            X=self.formatted_val_df)
 
-# params = {
-#     'objective':'reg:squarederror',
-#     'colsample_bytree': 0.3,
-#     'learning_rate': 0.1,
-#     'max_depth': 5,
-#     'alpha': 10
-# }
+        val_accuracy_score = accuracy_score(self.val_labels, val_predictions)
+        print("Test accuracy of XGBoost model: ", val_accuracy_score)
+
+    def test(self):
+        test_predictions = self.xgb_classificator.predict(
+            X=self.formatted_test_df)
+
+        test_accuracy_score = accuracy_score(
+            self.test_labels, test_predictions)
+
+        return test_accuracy_score
+
+    def save_model(self):
+        self.xgb_classificator.save_model(self.save_model_path)
