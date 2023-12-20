@@ -6,11 +6,12 @@ TRAIN_DF_PATH = os.path.join(HOME, 'train_data.xlsx')
 
 MODEL_NAME = "seara/rubert-tiny2-russian-sentiment"
 FINETUNED_MODEL_PATH = os.path.join(HOME, 'rubert-tiny2-finetuned')
+XGBOOST_MODEL_PATH = os.path.join(HOME, 'xgb_dart.json')
 
 VALIDATION_SIZE = 0.2
-MAX_LENGTH = 24
+MAX_LENGTH = 256
 
-NUM_EPOCHS = 1
+NUM_EPOCHS = 50
 BATCH_SIZE = 32
 
 RANDOM_STATE = 11
@@ -44,21 +45,28 @@ def main():
     transf_trainer.train()
     print("Transformer model has been trained.")
 
+    # Test Transformer model and save it
+    print(f"Test accuracy of Transformer model: {transf_trainer.test()}.")
+    transf_trainer.save_model()
+
     # Get transf_model for XGBostProcessor
     transf_model = transf_trainer.model
     transf_tokenizer = transf_dataset.tokenizer
 
-    print(f"Test accuracy: {transf_trainer.test()}.")
-    transf_trainer.save_model()
-    print("Transformer model has been saved.")
-
     # Train XGBostProcessor
     print("Training XGBoost model...")
-    xgb = XGBostProcessor(train_df=train_df,
-                          val_df=val_df,
-                          test_df=test_df,
-                          transf_model=transf_model,
-                          transf_tokenizer=transf_tokenizer)
+    xgb_processor = XGBostProcessor(train_df=train_df,
+                                    val_df=val_df,
+                                    test_df=test_df,
+                                    transf_model=transf_model,
+                                    transf_tokenizer=transf_tokenizer,
+                                    save_model_path=XGBOOST_MODEL_PATH)
+    xgb_processor.fit_xgb()
+    print("XGBoost model has been trained.")
+
+    # Test XGBoost model and save it
+    print(f"Test accuracy of XGBoost model: {xgb_processor.test()}")
+    xgb_processor.save_model()
 
 
 if __name__ == '__main__':
