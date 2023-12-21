@@ -180,13 +180,9 @@ class TinkoffScraper:
             self.url_api = f'https://www.tinkoff.ru/api/invest-gw/social/post/feed/v1/post/instrument/SBER?sessionId=QxZLiUIV31WxIZ4WonMwyIGI3UqG0zFO.ds-prod-api-101&appName=socialweb&appVersion=1.380.0&origin=web&platform=web&limit={self.recordings_limit}&cursor={next_cursor}&include=all'
 
             # Count how many days
-            if item_datetime > self.datetime_finish:
-                days_left = sum_days_to_scrape
-            else:
-                days_left = (self.datetime_finish - item_datetime).days + 1
+            days_gone = (self.datetime_finish - item_datetime).days if item_datetime < self.datetime_finish else 0
 
-            sum_days_left = sum_days_to_scrape - days_left
-            print(f"It was scraped {sum_days_left}/{sum_days_to_scrape} days.")
+            print(f"It was scraped {days_gone}/{sum_days_to_scrape} days.")
 
             # Sleep some time to do not be blocked
             sleep(random.uniform(2, 4))
