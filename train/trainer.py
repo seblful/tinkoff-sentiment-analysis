@@ -1,3 +1,4 @@
+import joblib
 import pandas as pd
 from tqdm import tqdm
 
@@ -290,13 +291,14 @@ class XGBostProcessor:
                  test_df,
                  transf_model,
                  transf_tokenizer,
-                 save_model_path):
+                 save_model_path,
+                 scaler_path):
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         self.save_model_path = save_model_path
+        self.scaler_path = scaler_path
 
-        self.tfidf_vectorizer = TfidfVectorizer()
         self.transf_model = transf_model
         self.transf_tokenizer = transf_tokenizer
 
@@ -330,9 +332,7 @@ class XGBostProcessor:
             df=test_df, name_of_set='test')
 
         # Create and fit StandardScaler
-        self.standart_scaler = StandardScaler()
-        self.standart_scaler.fit(
-            self.formatted_train_df.loc[:, self.scaler_columns])
+        self.create_scaler()
 
         # Scale dfs
         self.scale_df(self.formatted_train_df)
@@ -346,6 +346,13 @@ class XGBostProcessor:
                                                booster='dart',
                                                sampling_method='uniform',
                                                num_classes=3)
+
+    def create_scaler(self):
+        self.standart_scaler = StandardScaler()
+        self.standart_scaler.fit(
+            self.formatted_train_df.loc[:, self.scaler_columns])
+
+        joblib.dump(self.standart_scaler, self.scaler_path)
 
     def preprocess_df(self, df, name_of_set):
         # Leave only target columns
