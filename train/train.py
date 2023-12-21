@@ -7,11 +7,12 @@ TRAIN_DF_PATH = os.path.join(HOME, 'train_data.xlsx')
 MODEL_NAME = "seara/rubert-tiny2-russian-sentiment"
 FINETUNED_MODEL_PATH = os.path.join(HOME, 'rubert-tiny2-finetuned')
 XGBOOST_MODEL_PATH = os.path.join(HOME, 'xgb_dart.json')
+SCALER_PATH = os.path.join(HOME, 'scaler.pkl')
 
 VALIDATION_SIZE = 0.2
 MAX_LENGTH = 48
 
-NUM_EPOCHS = 50
+NUM_EPOCHS = 5
 BATCH_SIZE = 128
 
 RANDOM_STATE = 11
@@ -59,7 +60,8 @@ def main():
                                     test_df=test_df,
                                     transf_model=transf_model,
                                     transf_tokenizer=transf_tokenizer,
-                                    save_model_path=XGBOOST_MODEL_PATH)
+                                    save_model_path=XGBOOST_MODEL_PATH,
+                                    scaler_path=SCALER_PATH)
     xgb_processor.fit_xgb()
     print("XGBoost model has been trained.")
 
