@@ -26,6 +26,9 @@ import torch.nn.functional as F
 from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
 
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+
 
 class TinkoffScraper:
     def __init__(self,
@@ -343,5 +346,40 @@ class XGBoostModel:
 
 
 class Visualizer:
-    def __init__(self):
-        pass
+    def __init__(self,
+                 predictions):
+
+        self.predictions = predictions
+        self.id2label = {0: 'negative', 1: 'neutral', 2: 'positive'}
+
+        self.colors = ['red', 'blue', 'green']
+
+        self.sentiment_labels = [self.id2label[p] for p in self.predictions]
+
+        self.sentiment_counts = {
+            'negative': self.sentiment_labels.count('negative'),
+            'neutral': self.sentiment_labels.count('neutral'),
+            'positive': self.sentiment_labels.count('positive')
+        }
+
+        # Plotting the sentiment distribution
+        self.labels = list(self.sentiment_counts.keys())
+        self.counts = list(self.sentiment_counts.values())
+
+    def visualize_plt(self):
+        plt.bar(self.labels, self.counts, color=self.colors)
+        plt.xlabel('Sentiment')
+        plt.ylabel('Count')
+        plt.title('Investment Sentiment Analysis')
+
+        plt.show()
+
+    def visualize_go(self):
+        fig = go.Figure(
+            data=[go.Bar(x=self.labels, y=self.counts, marker_color=self.colors)])
+        fig.update_layout(
+            title="Investment Sentiment Analysis",
+            xaxis_title="Sentiment",
+            yaxis_title="Count"
+        )
+        fig.show()

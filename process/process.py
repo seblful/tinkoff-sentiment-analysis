@@ -1,4 +1,4 @@
-from processors import TinkoffScraper, DataProcessor, XGBoostModel
+from processors import TinkoffScraper, DataProcessor, XGBoostModel, Visualizer
 
 import os
 
@@ -19,18 +19,18 @@ SCALER_PATH = os.path.join(MODELS_FOLDER, 'scaler.pkl')
 
 def main():
     # Scraping from Tinkoff api
-    # scraper = TinkoffScraper(lists_path=LISTS_FOLDER,
-    #                          csv_save_path=CSV_SAVE_PATH,
-    #                          date_start='21-12-2023',
-    #                          date_finish='21-12-2023')
-    # scraper.scrape()
+    scraper = TinkoffScraper(lists_path=LISTS_FOLDER,
+                             csv_save_path=CSV_SAVE_PATH,
+                             date_start='20-12-2023',
+                             date_finish='21-12-2023')
+    scraper.scrape()
 
-    # # Process data and make initial predictions with transformer model
-    # processor = DataProcessor(csv_save_path=CSV_SAVE_PATH,
-    #                           csv_clean_save_path=CSV_CLEAN_SAVE_PATH,
-    #                           transformer_model_name=TRANSFORMER_MODEL_NAME,
-    #                           transformer_model_save_path=TRANSFORMER_MODEL_SAVE_PATH)
-    # processor.process()
+    # Process data and make initial predictions with transformer model
+    processor = DataProcessor(csv_save_path=CSV_SAVE_PATH,
+                              csv_clean_save_path=CSV_CLEAN_SAVE_PATH,
+                              transformer_model_name=TRANSFORMER_MODEL_NAME,
+                              transformer_model_save_path=TRANSFORMER_MODEL_SAVE_PATH)
+    processor.process()
 
     # Predict with XGBoost
     xgbooster = XGBoostModel(model_save_path=XGB_MODEL_SAVE_PATH,
@@ -40,6 +40,8 @@ def main():
     predictions = xgbooster.predict()
 
     # Visualize data
+    visualiser = Visualizer(predictions=predictions)
+    visualiser.visualize_plt()
 
 
 if __name__ == '__main__':
