@@ -2,12 +2,29 @@ import os
 import csv
 import json
 import requests
+import joblib
 
 from numpy import random
+import pandas as pd
+
+from tqdm import tqdm
 
 from time import sleep
 from datetime import datetime, date, time
 import pytz
+
+import re
+import nltk
+from nltk.corpus import stopwords
+import spacy
+import demoji
+from autocorrect import Speller
+
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch.nn.functional as F
+
+from xgboost import XGBClassifier
+from sklearn.preprocessing import StandardScaler
 
 
 class TinkoffScraper:
@@ -167,7 +184,7 @@ class TinkoffScraper:
     def scrape(self):
         # Get data from start to finish
         sum_days_to_scrape = (self.datetime_finish -
-                              self.datetime_start).days
+                              self.datetime_start).days + 1
         print(f"It is {sum_days_to_scrape} days to scrape.")
 
         while self.stop_scraping is False:
@@ -180,7 +197,8 @@ class TinkoffScraper:
             self.url_api = f'https://www.tinkoff.ru/api/invest-gw/social/post/feed/v1/post/instrument/SBER?sessionId=QxZLiUIV31WxIZ4WonMwyIGI3UqG0zFO.ds-prod-api-101&appName=socialweb&appVersion=1.380.0&origin=web&platform=web&limit={self.recordings_limit}&cursor={next_cursor}&include=all'
 
             # Count how many days
-            days_gone = (self.datetime_finish - item_datetime).days if item_datetime < self.datetime_finish else 0
+            days_gone = (self.datetime_finish -
+                         item_datetime).days if item_datetime < self.datetime_finish else 0
 
             print(f"It was scraped {days_gone}/{sum_days_to_scrape} days.")
 
@@ -188,13 +206,142 @@ class TinkoffScraper:
             sleep(random.uniform(2, 4))
 
 
+class DataProcessor:
+    def __init__(self,
+                 csv_save_path,
+                 csv_clean_save_path,
+                 transformer_model_name,
+                 transformer_model_save_path):
+
+        self.df = pd.read_csv(csv_save_path)
+
+        self.__stop_words = None
+
+        self.csv_save_path = csv_save_path
+        self.csv_clean_save_path = csv_clean_save_path
+
+        self.load_nlp()
+
+        self.trasformer_model = TransformerModel(model_name=transformer_model_name,
+                                                 model_save_path=transformer_model_save_path)
+
+    @property
+    def stop_words(self):
+        if self.__stop_words is None:
+            not_stop_words = ["без", "более", "да", "другой", "лучше", "много", "можно",
+                              "надо", "не", "нельзя", "нет", "ни", "никогда", "ничего", "хорошо"]
+            self.__stop_words = [word for word in stopwords.words(
+                'russian') if word not in not_stop_words]
+        return self.__stop_words
+
+    def load_nlp(self):
+        # !python -m spacy download ru_core_news_sm
+        self.nlp = spacy.load("ru_core_news_sm")
+        nltk.download('stopwords')
+        nltk.download('wordnet')
+
+    def clean_text(self, text):
+        text = text.lower()
+        text = re.sub("\{.*?\}+", " ", text)
+        text = re.sub("#\w+", " ", text)
+        text = re.sub("https?://\S+|www\.\S+", " ", text)
+        text = demoji.replace(text, ' ')
+        # text = Speller(lang='ru')(text)
+        text = re.sub(r"[^a-zA-ZА-Яа-я]", " ", text)
+
+        text = " ".join(word for word in text.split()
+                        if word not in self.stop_words)
+
+        text = [token.lemma_ for token in self.nlp(text)]
+        text = ' '.join(text)
+
+        return text
+
+    def process(self):
+        tqdm.pandas(desc='Cleaning text')
+        self.df['clean_text'] = self.df.loc[:,
+                                            'text'].progress_apply(self.clean_text)
+
+        tqdm.pandas(desc='Classifying text with Transformer model')
+        self.df[['predicted_label', 'predicted_score']
+                ] = self.df.loc[:, 'clean_text'].progress_apply(self.trasformer_model.classify_text)
+
+        self.save_df()
+
+    def save_df(self):
+        self.df.to_csv(self.csv_clean_save_path)
+
+
 class TransformerModel:
-    pass
+    def __init__(self,
+                 model_name,
+                 model_save_path):
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            model_save_path, num_labels=3)
+
+        self.id2label = self.model.config.id2label
+        self.label2id = self.model.config.label2id
+        # {'negative': 0, 'neutral': 1, 'positive': 2}
+
+    def classify_text(self, text):
+        # Decreate length of text to model maximum
+        text = text[:500]
+
+        encoded_input = self.tokenizer(text, return_tensors='pt')
+
+        # Get the logits
+        output = self.model(**encoded_input)
+        logits = output.logits
+        probabilities = F.softmax(logits, dim=1)
+
+        # Access the id2label mapping
+        predicted_class_id = logits.argmax().item()
+        predicted_class = self.id2label[predicted_class_id]
+        predicted_probability = probabilities.squeeze()[
+            predicted_class_id].item()
+
+        return pd.Series((predicted_class_id, predicted_probability))
 
 
 class XGBoostModel:
-    pass
+    def __init__(self,
+                 model_save_path,
+                 csv_clean_save_path,
+                 scaler_path):
+
+        # Load model and scaler
+        self.model = XGBClassifier()
+        self.model.load_model(model_save_path)
+        self.scaler = joblib.load(scaler_path)
+
+        # Define target columns
+        self.target_columns = ['total_reactions', 'like', 'rocket', 'buy-up', 'dislike', 'not-convinced',
+                               'get-rid', 'SBER', 'SBERP', 'GAZP', 'LKOH', 'VTBR', 'MOEX', 'ROSN',
+                               'YNDX', 'TCSG', 'NVTK', 'USDRUB', 'TATN', 'GMKN', 'MGNT', 'POLY',
+                               'VKCO', 'CHMF', 'MTSS', 'OZON', 'POSI', 'predicted_label', 'predicted_score']
+
+        # Define df and data
+        self.df = pd.read_csv(csv_clean_save_path)
+        self.scaled_data = self.prepare_data()
+
+    def prepare_data(self):
+        # Make copy and leave only target columns
+        df = self.df.copy(deep=True)
+        df = df.loc[:, self.target_columns]
+
+        # Scale
+        data = self.scaler.transform(df)
+
+        return data
+
+    def predict(self):
+        predictions = self.model.predict(X=self.scaled_data)
+
+        return predictions
 
 
 class Visualizer:
-    pass
+    def __init__(self):
+        pass
